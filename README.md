@@ -144,7 +144,7 @@ mount
   
   (content:)
   ```
-  /dev/xvde1               /        ext4      defaults         1 1
+  /dev/xvde1 /         ext4    defaults,noatime 1 1
   devpts     /dev/pts  devpts  gid=5,mode=620   0 0
   tmpfs      /dev/shm  tmpfs   defaults         0 0
   proc       /proc     proc    defaults         0 0
@@ -169,8 +169,8 @@ yum -c /opt/ec2/yum/yum-xen.conf --installroot=/mnt/ec2-image -y install *openss
   
   title CentOS 6.5 (Custom AMI)
   root (hd0)
-  kernel /boot/vmlinuz-2.6.32-431.el6.x86_64 ro root=/dev/xvde1 rd_NO_PLYMOUTH
-  initrd /boot/initramfs-2.6.32-431.el6.x86_64.img
+  kernel /boot/vmlinuz-2.6.32-431.1.2.0.1.el6.x86_64 ro root=/dev/xvde1 rd_NO_PLYMOUTH
+  initrd /boot/initramfs-2.6.32-431.1.2.0.1.el6.x86_64.img
   ```
   
   ```
@@ -202,7 +202,12 @@ touch /mnt/ec2-image/.autorelabel
   ```
   DEVICE=eth0
   BOOTPROTO=dhcp
-  ONBOOT=on
+  ONBOOT=yes
+  TYPE=Ethernet
+  USERCTL=yes
+  PEERDNS=yes
+  IPV6INIT=no
+  PERSISTENT_DHCLIENT=yes
   ```
 
 18. sshd
@@ -210,9 +215,10 @@ touch /mnt/ec2-image/.autorelabel
   nano /mnt/ec2-image/etc/ssh/sshd_config
   ```
   
-  (content:)
+  (changes:)
   ```
   ...
+  PasswordAuthentication no
   UseDNS no
   PermitRootLogin without-password
   ```
@@ -222,6 +228,7 @@ touch /mnt/ec2-image/.autorelabel
   ```
   
   (content:)
+  Note: 
   ```
   ...
   # set a random pass on first boot
@@ -235,11 +242,17 @@ touch /mnt/ec2-image/.autorelabel
     mkdir -m 0700 -p /root/.ssh
     restorecon /root/.ssh
   fi
+  
   # Get the root ssh key setup
   ReTry=0
-  while [ ! -f /root/.ssh/authorized_keys ] && [ $ReTry -lt 5 ]; do
+  while [ ! -f /root/.ssh/authorized_keys ] && [ $ReTry -lt 10 ]; do
     sleep 2
-    curl -f http://169.254.169.254/latest/meta-data/public-keys/0/openssh-key > /root/.ssh/authorized_keys
+    curl -f http://169.254.169.254/latest/meta-data/public-keys/0/openssh-key > /tmp/my-public-key
+    if [ $? -eq 0 ]; then
+      cat /tmp/my-public-key > /root/.ssh/authorized_keys
+      rm -f /tmp/my-public-key
+      ReTry=10
+    fi
     ReTry=$[Retry+1]
   done
   chmod 600 /root/.ssh/authorized_keys && restorecon /root/.ssh/authorized_keys
@@ -304,4 +317,29 @@ mount
   
   Register new AMI
 
-##DONE
+24. Launch. Done.
+
+## Convert to EBS-backed AMI
+@see [HERE](http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/creating-an-ami-instance-store.html#Using_ConvertingS3toEBS)
+
+Notes:
+
+1. Step 1 & 2 can be simplify by launching an Amazon Linux EBS micro instance, with 20G storage
+
+2. device_name can be found (after attached) by
+```
+egrep '[xvsh]d[a-z].*$' /proc/partitions
+mkfs.ext4 /dev/xvdj
+```
+
+3. In step 3: use mkfs.ext4 insteads of ext3
+
+## Notes after launching EBS-backed instance
+1. If you change capacity of root device when launching the AMI (insteads of using default), then you should:
+```
+egrep '[xvsh]d[a-z].*$' /proc/partitions
+df -k
+resize2fs /dev/xvda1
+```
+
+2. Should change hostname right after launching
